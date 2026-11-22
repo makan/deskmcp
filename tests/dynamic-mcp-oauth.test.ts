@@ -53,7 +53,7 @@ test('DeskMCP OAuth provider persists protocol state without exposing secrets in
   const provider = new DeskMcpOAuthProvider(
     'oauth:test',
     store,
-    'http://127.0.0.1:8765/oauth/callback/test'
+    'http://127.0.0.1:8120/oauth/callback/test'
   );
   await provider.init();
 
@@ -107,7 +107,7 @@ test('DeskMCP OAuth provider persists protocol state without exposing secrets in
   const reloaded = new DeskMcpOAuthProvider(
     'oauth:test',
     store,
-    'http://127.0.0.1:8765/oauth/callback/test'
+    'http://127.0.0.1:8120/oauth/callback/test'
   );
   await reloaded.init();
   assert.equal((await reloaded.tokens())?.refresh_token, 'refresh-secret');
@@ -143,7 +143,7 @@ test('DeskMCP OAuth provider migrates legacy hashed secret state only when the c
   const provider = new DeskMcpOAuthProvider(
     key,
     store,
-    'http://127.0.0.1:8765/oauth/callback/legacy'
+    'http://127.0.0.1:8120/oauth/callback/legacy'
   );
   await provider.init();
 
@@ -177,7 +177,7 @@ test('DeskMCP OAuth provider migrates legacy hashed secret state only when the c
   const currentWins = new DeskMcpOAuthProvider(
     key,
     store,
-    'http://127.0.0.1:8765/oauth/callback/legacy'
+    'http://127.0.0.1:8120/oauth/callback/legacy'
   );
   await currentWins.init();
   assert.equal((await currentWins.tokens())?.access_token, 'legacy-access-secret');
@@ -218,7 +218,7 @@ test('DeskMCP OAuth provider discovers an unidentified legacy secret by matching
   const provider = new DeskMcpOAuthProvider(
     key,
     store,
-    'http://127.0.0.1:8765/oauth/callback/resource-match',
+    'http://127.0.0.1:8120/oauth/callback/resource-match',
     undefined,
     undefined,
     undefined,
@@ -253,7 +253,7 @@ test('DeskMCP OAuth provider discovers an unidentified legacy secret by matching
   const changedResourceProvider = new DeskMcpOAuthProvider(
     'dynamic-mcp:changed-resource',
     changedResource,
-    'http://127.0.0.1:8765/oauth/callback/changed-resource',
+    'http://127.0.0.1:8120/oauth/callback/changed-resource',
     undefined,
     undefined,
     undefined,
@@ -279,7 +279,7 @@ test('DeskMCP OAuth provider discovers an unidentified legacy secret by matching
   const ambiguousProvider = new DeskMcpOAuthProvider(
     'dynamic-mcp:ambiguous',
     ambiguous,
-    'http://127.0.0.1:8765/oauth/callback/ambiguous',
+    'http://127.0.0.1:8120/oauth/callback/ambiguous',
     undefined,
     undefined,
     undefined,
@@ -296,7 +296,7 @@ test('DeskMCP OAuth provider uses a pre-registered client without persisting its
   const provider = new DeskMcpOAuthProvider(
     'oauth:static-client',
     store,
-    'http://127.0.0.1:8765/oauth/callback/github',
+    'http://127.0.0.1:8120/oauth/callback/github',
     'read:user',
     undefined,
     {
@@ -332,7 +332,7 @@ test('DeskMCP OAuth provider enforces the configured authorization scope at redi
   const provider = new DeskMcpOAuthProvider(
     'oauth:scoped',
     store,
-    'http://127.0.0.1:8765/oauth/callback/github',
+    'http://127.0.0.1:8120/oauth/callback/github',
     'read:user repo',
     (url) => { redirected = url; }
   );

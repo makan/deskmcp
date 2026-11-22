@@ -7,7 +7,7 @@ struct TunnelRuntimeStatusPolicyTests {
     private let now = Date(timeIntervalSince1970: 2_000)
 
     private var goodStatus: String {
-        "{\"control_plane_tunnel_id\":\"\(tunnelID)\",\"mcp_server_url\":\"http://127.0.0.1:8765/mcp\",\"tunnel_metadata\":{\"ID\":\"\(tunnelID)\"}}"
+        "{\"control_plane_tunnel_id\":\"\(tunnelID)\",\"mcp_server_url\":\"http://127.0.0.1:8120/mcp\",\"tunnel_metadata\":{\"ID\":\"\(tunnelID)\"}}"
     }
 
     @Test func exactTunnelAndFreshControlPlanePollAreRequired() {
@@ -62,7 +62,7 @@ struct TunnelRuntimeStatusPolicyTests {
             expectedTunnelID: tunnelID,
             readyRequestOK: true,
             readyBody: "ready",
-            statusBody: "{\"control_plane_tunnel_id\":\"\(otherID)\",\"mcp_server_url\":\"http://127.0.0.1:8765/mcp\",\"tunnel_metadata\":{\"ID\":\"\(otherID)\"}}",
+            statusBody: "{\"control_plane_tunnel_id\":\"\(otherID)\",\"mcp_server_url\":\"http://127.0.0.1:8120/mcp\",\"tunnel_metadata\":{\"ID\":\"\(otherID)\"}}",
             metricsBody: "commands_poll_last_successful_timestamp_seconds 1995\n",
             now: now
         )

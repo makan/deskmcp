@@ -23,6 +23,9 @@ final class DeskMCPModel: ObservableObject {
     @Published var autoStartTunnel = false
     @Published var startAtLogin = false
     @Published var message: String?
+    @Published var gatewayPort = DeskMCPServicePorts.defaultGatewayPort
+    @Published var tunnelClientPort = DeskMCPServicePorts.defaultTunnelClientPort
+    private var savedGatewayPort = DeskMCPServicePorts.defaultGatewayPort
 
     private let defaults = UserDefaults.standard
     private let paths: RuntimePaths?
@@ -40,6 +43,13 @@ final class DeskMCPModel: ObservableObject {
         workspace = defaults.string(forKey: "workspace") ?? defaultWorkspace
         tunnelID = defaults.string(forKey: "tunnelId") ?? ""
         autoStartTunnel = defaults.bool(forKey: "autoStartTunnel")
+        let storedGatewayPort = defaults.object(forKey: "gatewayPort") as? Int ?? DeskMCPServicePorts.defaultGatewayPort
+        let environmentGatewayPort = ProcessInfo.processInfo.environment["DESKTOP_MCP_PORT"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.savedGatewayPort = (1...65535).contains(storedGatewayPort) ? storedGatewayPort : DeskMCPServicePorts.defaultGatewayPort
+        gatewayPort = DeskMCPServicePorts.resolveGatewayPort(saved: self.savedGatewayPort, environment: environmentGatewayPort)
+        let savedTunnelPort = defaults.object(forKey: "tunnelClientPort") as? Int ?? DeskMCPServicePorts.defaultTunnelClientPort
+        tunnelClientPort = (1...65535).contains(savedTunnelPort) ? savedTunnelPort : DeskMCPServicePorts.defaultTunnelClientPort
+        if let raw = environmentGatewayPort, !raw.isEmpty, Int(raw).map({ !(1...65535).contains($0) }) ?? true { message = "DESKTOP_MCP_PORT is invalid; using the saved Gateway port." }
         let storedProfile = defaults.string(forKey: "profile")
         profile = storedProfile == DeskMCPProfile.workspaceWrite.rawValue ? .workspaceWrite : .readOnly
         if #available(macOS 13.0, *) {
@@ -56,6 +66,69 @@ final class DeskMCPModel: ObservableObject {
                 await self.supervisorTick()
                 do { try await Task.sleep(nanoseconds: 2_000_000_000) }
                 catch { return }
+            }
+        }
+    }
+
+    private func isPortAvailable(_ port: Int) -> Bool {
+        let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { Darwin.close(descriptor) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        address.sin_addr = in_addr(s_addr: in_addr_t(0x7f000001).bigEndian)
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return result == 0
+    }
+
+    func savePorts(gatewayPortText: String, tunnelClientPortText: String) {
+        guard let nextGatewayPort = DeskMCPServicePorts.parse(gatewayPortText),
+              let nextTunnelPort = DeskMCPServicePorts.parse(tunnelClientPortText) else {
+            message = "Ports must be whole numbers between 1 and 65535."
+            return
+        }
+        let hasGatewayPortOverride = DeskMCPServicePorts.parse(ProcessInfo.processInfo.environment["DESKTOP_MCP_PORT"] ?? "") != nil
+        if hasGatewayPortOverride && nextGatewayPort != gatewayPort {
+            message = "DESKTOP_MCP_PORT overrides the saved Gateway port. Remove it to change this value."
+            return
+        }
+        if nextGatewayPort != gatewayPort && !isPortAvailable(nextGatewayPort) {
+            message = "Gateway port \(nextGatewayPort) is already in use."
+            return
+        }
+        if nextTunnelPort != tunnelClientPort && !isPortAvailable(nextTunnelPort) {
+            message = "Tunnel Client port \(nextTunnelPort) is already in use."
+            return
+        }
+        let previousGatewayPort = gatewayPort
+        let previousTunnelPort = tunnelClientPort
+        if !hasGatewayPortOverride { savedGatewayPort = nextGatewayPort }
+        gatewayPort = nextGatewayPort
+        tunnelClientPort = nextTunnelPort
+        defaults.set(savedGatewayPort, forKey: "gatewayPort")
+        defaults.set(tunnelClientPort, forKey: "tunnelClientPort")
+        message = "Port settings saved."
+        Task { [weak self] in
+            guard let self else { return }
+            if previousGatewayPort != self.gatewayPort {
+                self.gatewaySupervisor.reset()
+                await self.stopGateway()
+                _ = await self.stopDetachedGatewayIfPresent(port: previousGatewayPort)
+                self.startGateway()
+            }
+            if previousGatewayPort != self.gatewayPort || previousTunnelPort != self.tunnelClientPort {
+                await self.stopOwnedTunnel()
+                if Self.validTunnelID(self.tunnelID) {
+                    do { try self.configureTunnel(id: self.tunnelID) }
+                    catch { self.message = "Ports saved, but Tunnel configuration failed: \(error.localizedDescription)"; return }
+                }
+                self.startTunnelIfPossible()
             }
         }
     }
@@ -135,8 +208,9 @@ final class DeskMCPModel: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             self.gatewaySupervisor.reset()
+            let previousPort = self.gatewayPort
             await self.stopGateway()
-            _ = await self.stopDetachedGatewayIfPresent()
+            _ = await self.stopDetachedGatewayIfPresent(port: previousPort)
             self.startGateway()
         }
     }
@@ -179,6 +253,7 @@ final class DeskMCPModel: ObservableObject {
         environment.removeValue(forKey: "CONTROL_PLANE_API_KEY")
         environment["DESKTOP_MCP_PROFILE"] = profile.rawValue
         environment["DESKTOP_MCP_ALLOWED_ROOTS"] = workspace
+        environment["DESKTOP_MCP_PORT"] = String(gatewayPort)
         environment["DESKTOP_MCP_AUDIT_LOG"] = paths.logs.appendingPathComponent("audit.jsonl").path
         process.environment = environment
         gatewayProcess = process
@@ -220,14 +295,14 @@ final class DeskMCPModel: ObservableObject {
         gatewayReady = false
     }
 
-    private func stopDetachedGatewayIfPresent() async -> Bool {
+    private func stopDetachedGatewayIfPresent(port: Int? = nil) async -> Bool {
         guard gatewayProcess == nil, let paths else { return false }
         let stopEntry = paths.gatewayRoot.appendingPathComponent("dist/src/stop.js")
         guard FileManager.default.isExecutableFile(atPath: paths.node.path),
               FileManager.default.fileExists(atPath: stopEntry.path) else { return false }
         let process = Process()
         process.executableURL = paths.node
-        process.arguments = ["dist/src/stop.js", "8765"]
+        process.arguments = ["dist/src/stop.js", String(port ?? gatewayPort)]
         process.currentDirectoryURL = paths.gatewayRoot
         var environment = ProcessInfo.processInfo.environment
         environment.removeValue(forKey: "CONTROL_PLANE_API_KEY")
@@ -254,9 +329,12 @@ final class DeskMCPModel: ObservableObject {
             "init", "--sample", "sample_mcp_remote_no_auth",
             "--profile", "desktop-mcp",
             "--tunnel-id", id,
-            "--mcp-server-url", "http://127.0.0.1:8765/mcp",
+            "--mcp-server-url", "http://127.0.0.1:\(gatewayPort)/mcp",
             "--force"
         ]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HEALTH_LISTEN_ADDR"] = "127.0.0.1:\(tunnelClientPort)"
+        process.environment = environment
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
@@ -296,6 +374,7 @@ final class DeskMCPModel: ObservableObject {
         process.arguments = ["run", "--profile", "desktop-mcp"]
         var environment = ProcessInfo.processInfo.environment
         environment["CONTROL_PLANE_API_KEY"] = key
+        environment["HEALTH_LISTEN_ADDR"] = "127.0.0.1:\(tunnelClientPort)"
         process.environment = environment
         tunnelProcess = process
         process.terminationHandler = { terminated in
@@ -339,7 +418,7 @@ final class DeskMCPModel: ObservableObject {
     func refreshStatus() async {
         gatewayReady = false
         do {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:8765/health")!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(gatewayPort)/health")!)
             request.timeoutInterval = 1
             let (data, response) = try await URLSession.shared.data(for: request)
             if (response as? HTTPURLResponse)?.statusCode == 200 {
@@ -366,14 +445,14 @@ final class DeskMCPModel: ObservableObject {
         var statusBody = ""
         var metricsBody = ""
         do {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:8080/readyz")!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(tunnelClientPort)/readyz")!)
             request.timeoutInterval = 1
             let (data, response) = try await URLSession.shared.data(for: request)
             readyRequestOK = (response as? HTTPURLResponse)?.statusCode == 200
             readyBody = String(decoding: data, as: UTF8.self)
         } catch { }
         do {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:8080/api/status")!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(tunnelClientPort)/api/status")!)
             request.timeoutInterval = 1
             let (data, response) = try await URLSession.shared.data(for: request)
             let body = String(decoding: data, as: UTF8.self)
@@ -384,7 +463,7 @@ final class DeskMCPModel: ObservableObject {
             }
         } catch { }
         do {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:8080/metrics")!)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(tunnelClientPort)/metrics")!)
             request.timeoutInterval = 1
             let (data, response) = try await URLSession.shared.data(for: request)
             if (response as? HTTPURLResponse)?.statusCode == 200 {
@@ -398,7 +477,8 @@ final class DeskMCPModel: ObservableObject {
             readyBody: readyBody,
             statusBody: statusBody,
             metricsBody: metricsBody,
-            now: Date()
+            now: Date(),
+            expectedGatewayPort: gatewayPort
         )
         tunnelReady = tunnelEvaluation.ready
 

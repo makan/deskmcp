@@ -59,7 +59,7 @@ The Runtime API Key is protected with Windows DPAPI and is not written to `setti
 ```text
 ChatGPT
   ↕ OpenAI Tunnel
-DeskMCP Gateway  (127.0.0.1:8765)
+DeskMCP Gateway  (127.0.0.1:<Gateway Port>, default 8120)
   ↕ local policy enforcement
   ├─ DeskMCP backend
   │   ↳ selected workspace
@@ -137,7 +137,7 @@ Agent Desktop Browser sessions belong to the Agent Control lease rather than one
 
 ## Security model
 
-- Gateway HTTP binds only to `127.0.0.1:8765`.
+- Gateway HTTP binds only to loopback (`127.0.0.1`) on the configurable Gateway Port (default `8120`).
 - In Read, Write and Full, allowed filesystem access is restricted to the locally selected Workspace and lexical/canonical path checks block symlink/junction escapes.
 - Sensitive paths such as `.env`, `.npmrc`, `.pypirc`, `.netrc`, `.ssh`, `.gnupg`, and `.aws/credentials` are denied by default, and search excludes them before DeskMCP backend/ripgrep reads candidates.
 - In Read/Write/Full, `desktop_read_file` issues a one-time opaque `observation_id`. Editing, moving, or overwriting an existing file must present the matching fresh capability; capabilities are path/version-bound, single-use, bounded to 1024 entries, and same-path mutations are serialized across Gateway instances so concurrent agents cannot silently overwrite each other from the same observed version.
@@ -257,6 +257,7 @@ Start with [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md). For reproducibl
 - [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — release QA
 - [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — bundled dependency licensing
 - [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — illustrated installation and usage guide
+- [`docs/PORT_CONFIGURATION.md`](docs/PORT_CONFIGURATION.md) — Gateway and Tunnel Client port settings, persistence, and environment precedence
 - [`docs/COMPUTER_USE.md`](docs/COMPUTER_USE.md) — Windows Computer Use flow, permissions, observation safety, and backend packaging
 - [`docs/MACOS_DEVELOPER_PREVIEW.md`](docs/MACOS_DEVELOPER_PREVIEW.md) — Apple Silicon Developer Preview download, checksum, and Gatekeeper guidance
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — common setup and recovery paths

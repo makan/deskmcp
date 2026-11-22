@@ -6,6 +6,7 @@ param(
     [ValidateSet('win-x64','win-arm64')][string]$Target = 'win-x64'
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'port-defaults.ps1')
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 . (Join-Path $PSScriptRoot 'release-targets.ps1')
 . (Join-Path $PSScriptRoot 'release-provenance.ps1')
@@ -26,9 +27,13 @@ $setupSourceCommit = Get-DeskMcpSetupSourceCommit $Setup
 Require ($stageSourceCommit -eq $currentSourceCommit) ('Release-stage source commit ' + $stageSourceCommit + ' does not match current source ' + $currentSourceCommit + '.')
 Require ($setupSourceCommit -eq $currentSourceCommit) ('Setup embedded source commit ' + $setupSourceCommit + ' does not match current source ' + $currentSourceCommit + '.')
 Write-Output ('SIGN_PROVENANCE_OK=' + $currentSourceCommit)
+$settingsPath = Join-Path $env:APPDATA 'DesktopMCP\settings.json'
+$settings = if (Test-Path -LiteralPath $settingsPath) { Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json } else { $null }
+$GatewayPort = if (-not [string]::IsNullOrWhiteSpace($env:DESKTOP_MCP_PORT)) { [int]$env:DESKTOP_MCP_PORT } elseif ($settings.gatewayPort -ge 1 -and $settings.gatewayPort -le 65535) { [int]$settings.gatewayPort } else { $DeskMCPDefaultGatewayPort }
+if ($GatewayPort -lt 1 -or $GatewayPort -gt 65535) { throw 'DESKTOP_MCP_PORT must be an integer from 1 to 65535.' }
 try {
-    Invoke-RestMethod 'http://127.0.0.1:8765/health' -TimeoutSec 1 | Out-Null
-    throw 'DeskMCP is running on port 8765. Quit DeskMCP before signing so installer smoke cannot affect the live instance.'
+    Invoke-RestMethod "http://127.0.0.1:$GatewayPort/health" -TimeoutSec 1 | Out-Null
+    throw "DeskMCP is running on port $GatewayPort. Quit DeskMCP before signing so installer smoke cannot affect the live instance."
 } catch {
     if ($_.Exception.Message -like 'DeskMCP is running*') { throw }
 }

@@ -169,7 +169,7 @@ test('Task-linked Agent Desktop control only auto-stops for the matching task', 
       heartbeatAtUtc: new Date().toISOString()
     });
 
-    const wrong = await manager.stopControlForTask('tsk_fedcba9876543210');
+    const wrong = await manager.stopControlForTask('tsk_fedcba9812043210');
     assert.equal(wrong.stopped, false);
     assert.equal(wrong.status.control.active, true);
     assert.equal(wrong.status.control.leaseId, leaseId);

@@ -29,7 +29,6 @@ public struct TunnelRuntimeEvaluation: Equatable {
 }
 
 public enum TunnelRuntimeStatusPolicy {
-    private static let expectedMCPURL = "http://127.0.0.1:8765/mcp"
     private static let pollFreshness: TimeInterval = 90
 
     public static func evaluate(
@@ -38,7 +37,8 @@ public enum TunnelRuntimeStatusPolicy {
         readyBody: String,
         statusBody: String,
         metricsBody: String,
-        now: Date
+        now: Date,
+        expectedGatewayPort: Int = DeskMCPServicePorts.defaultGatewayPort
     ) -> TunnelRuntimeEvaluation {
         let localReady = readyRequestOK && readyBody.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "ready"
         var endpointMatches = false
@@ -59,7 +59,7 @@ public enum TunnelRuntimeStatusPolicy {
             return result(localReady, endpointMatches, controlPlaneReady, credentialRejected, tunnelIDMismatch, "Tunnel status JSON is invalid.")
         }
 
-        endpointMatches = (root["mcp_server_url"] as? String)?.caseInsensitiveCompare(expectedMCPURL) == .orderedSame
+        endpointMatches = (root["mcp_server_url"] as? String)?.caseInsensitiveCompare("http://127.0.0.1:\(expectedGatewayPort)/mcp") == .orderedSame
         guard endpointMatches else {
             return result(localReady, endpointMatches, controlPlaneReady, credentialRejected, tunnelIDMismatch, "The running tunnel belongs to a different MCP endpoint.")
         }

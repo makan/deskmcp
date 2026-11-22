@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using Microsoft.Win32;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -59,10 +60,14 @@ internal sealed class PanelSettings
     public string browserExecutablePath { get; set; }
     public bool? browserAutoDetect { get; set; }
     public bool? onboardingCompleted { get; set; }
+    public int? gatewayPort { get; set; }
+    public int? tunnelClientPort { get; set; }
 }
 
 internal sealed partial class ControlPanelRuntime
 {
+    internal const int DefaultGatewayPort = 8120;
+    internal const int DefaultTunnelClientPort = 8888;
     [DllImport("user32.dll", CharSet = CharSet.Auto)]
     private static extern bool DestroyIcon(IntPtr handle);
 
@@ -72,7 +77,9 @@ internal sealed partial class ControlPanelRuntime
     private readonly string logsDir;
     private readonly string settingsDir;
     private readonly string nodePath;
-    private readonly int gatewayPort;
+    private int gatewayPort = DefaultGatewayPort;
+    private int savedGatewayPort = DefaultGatewayPort;
+    private int tunnelClientPort = DefaultTunnelClientPort;
     private static readonly HttpClient StatusHttpClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(500) };
     private readonly Window window;
     private readonly Border rootCard;
@@ -123,6 +130,7 @@ internal sealed partial class ControlPanelRuntime
     private bool tunnelCredentialRejected;
     private TunnelRuntimeStatus lastTunnelStatus = new TunnelRuntimeStatus();
     private bool gatewayStartInFlight;
+    private readonly object gatewayProcessSync = new object();
     private Process gatewayProcess;
     private int gatewayRetryIndex;
     private DateTime gatewayUnhealthySince = DateTime.MinValue;
@@ -195,14 +203,64 @@ internal sealed partial class ControlPanelRuntime
     private bool livePulseActive;
     private DateTime autoHideAfter;
 
-    private static int ResolveGatewayPort()
+    private static int ResolveGatewayPort(int savedPort)
     {
         string raw = Environment.GetEnvironmentVariable("DESKTOP_MCP_PORT");
-        if (String.IsNullOrWhiteSpace(raw)) return 8765;
+        if (String.IsNullOrWhiteSpace(raw)) return savedPort;
         int port;
-        if (!Int32.TryParse(raw, out port) || port < 1 || port > 65535)
+        if (!TryParsePort(raw, out port))
             throw new InvalidOperationException("DESKTOP_MCP_PORT must be an integer from 1 to 65535.");
         return port;
+    }
+
+    private static bool IsValidPort(int port) { return port >= 1 && port <= 65535; }
+
+    private static int MigrateLegacyPort(int? configuredPort, int legacyDefault, int currentDefault)
+    {
+        if (!configuredPort.HasValue || !IsValidPort(configuredPort.Value)) return currentDefault;
+        return configuredPort.Value == legacyDefault ? currentDefault : configuredPort.Value;
+    }
+
+    private static bool TryParsePort(string raw, out int port)
+    {
+        raw = (raw ?? String.Empty).Trim();
+        if (raw.Length == 0) { port = 0; return false; }
+        for (int i = 0; i < raw.Length; i++) if (raw[i] < '0' || raw[i] > '9') { port = 0; return false; }
+        return Int32.TryParse(raw, out port) && IsValidPort(port);
+    }
+
+    private static bool HasValidGatewayPortOverride()
+    {
+        string raw = Environment.GetEnvironmentVariable("DESKTOP_MCP_PORT");
+        int port;
+        return !String.IsNullOrWhiteSpace(raw) && TryParsePort(raw, out port);
+    }
+
+    internal static int RunPortSettingsSelfTest()
+    {
+        string previous = Environment.GetEnvironmentVariable("DESKTOP_MCP_PORT");
+        try
+        {
+            Environment.SetEnvironmentVariable("DESKTOP_MCP_PORT", null);
+            if (DefaultGatewayPort != 8120 || DefaultTunnelClientPort != 8888 || ResolveGatewayPort(DefaultGatewayPort) != DefaultGatewayPort) return 1;
+            int parsedPort;
+            if (!IsValidPort(1) || !IsValidPort(65535) || IsValidPort(0) || IsValidPort(65536) ||
+                !TryParsePort("1", out parsedPort) || parsedPort != 1 || TryParsePort("+1", out parsedPort) || TryParsePort("1.5", out parsedPort)) return 2;
+            if (MigrateLegacyPort(8765, 8765, DefaultGatewayPort) != DefaultGatewayPort ||
+                MigrateLegacyPort(8080, 8080, DefaultTunnelClientPort) != DefaultTunnelClientPort ||
+                MigrateLegacyPort(54321, 8765, DefaultGatewayPort) != 54321) return 6;
+            PanelSettings persisted = new PanelSettings { theme = "dark", gatewayPort = DefaultGatewayPort, tunnelClientPort = DefaultTunnelClientPort };
+            PanelSettings restored = JsonSerializer.Deserialize<PanelSettings>(JsonSerializer.Serialize(persisted));
+            if (restored == null || restored.theme != "dark" || restored.gatewayPort != DefaultGatewayPort || restored.tunnelClientPort != DefaultTunnelClientPort) return 5;
+            Environment.SetEnvironmentVariable("DESKTOP_MCP_PORT", "54321");
+            if (ResolveGatewayPort(1234) != 54321) return 3;
+            Environment.SetEnvironmentVariable("DESKTOP_MCP_PORT", "invalid");
+            try { ResolveGatewayPort(DefaultGatewayPort); return 4; }
+            catch (InvalidOperationException) { }
+            Console.WriteLine("PORT_SETTINGS_SELF_TEST_OK");
+            return 0;
+        }
+        finally { Environment.SetEnvironmentVariable("DESKTOP_MCP_PORT", previous); }
     }
 
     private static string ResolveStartupLinkPath()
@@ -254,7 +312,7 @@ internal sealed partial class ControlPanelRuntime
     {
         baseDir = AppDomain.CurrentDomain.BaseDirectory;
         projectRoot = ResolveGatewayRoot(baseDir);
-        gatewayPort = ResolveGatewayPort();
+        // Resolved after persisted settings are loaded.
         dataRoot = ResolveStateDirectory("DESKTOP_MCP_DATA_ROOT", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopMCP"));
         logsDir = Path.Combine(dataRoot, "logs");
         settingsDir = ResolveStateDirectory("DESKTOP_MCP_SETTINGS_DIR", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopMCP"));
@@ -289,6 +347,17 @@ internal sealed partial class ControlPanelRuntime
         themeIndicator = Find<Border>("ThemeIndicator");
         themeIndicatorTransform = (TranslateTransform)themeIndicator.RenderTransform;
         LoadSettings();
+
+
+        try { gatewayPort = ResolveGatewayPort(savedGatewayPort); }
+        catch (Exception ex)
+        {
+            gatewayPort = savedGatewayPort;
+            LogRuntimeError("Invalid DESKTOP_MCP_PORT; saved Gateway port used.", ex);
+            ShowToast("DESKTOP_MCP_PORT is invalid; using the saved Gateway port.", true);
+        }
+        Find<TextBox>("GatewayPortInput").Text = gatewayPort.ToString();
+        Find<TextBox>("TunnelClientPortInput").Text = tunnelClientPort.ToString();
         InitializePendingUpdateVerification();
         CleanupStaleUpdateDownloads();
         if (!TunnelDisabledByEnvironment() && !IsValidTunnelId(tunnelId))
@@ -606,6 +675,7 @@ internal sealed partial class ControlPanelRuntime
         if (!IsValidTunnelId(id)) throw new InvalidOperationException("Tunnel ID is invalid.");
         if (!File.Exists(tunnelClientPath)) throw new FileNotFoundException("tunnel-client.exe is not installed.", tunnelClientPath);
         ProcessStartInfo psi = NewHiddenProcess(tunnelClientPath, "init --sample sample_mcp_remote_no_auth --profile desktop-mcp --tunnel-id " + id + " --mcp-server-url http://127.0.0.1:" + gatewayPort + "/mcp --force");
+        psi.EnvironmentVariables["HEALTH_LISTEN_ADDR"] = "127.0.0.1:" + tunnelClientPort;
         Process p = Process.Start(psi);
         if (p == null) throw new InvalidOperationException("Could not initialize the Tunnel profile.");
         try
@@ -682,9 +752,21 @@ internal sealed partial class ControlPanelRuntime
         autoStartTunnel = settings.autoStartTunnel;
         showAdminRequestDetails = settings.showAdminRequestDetails ?? true;
         bool downgradePersistedFull = settings.profile == "full-control" || settings.profile == "fully-unlocked";
+        bool migratedLegacyPorts = false;
         persistentProfile = settings.profile == "workspace-write" ? "workspace-write" : "read-only";
         selectedProfile = persistentProfile;
         if (IsValidTunnelId(settings.tunnelId)) tunnelId = settings.tunnelId;
+        if (settings.gatewayPort.HasValue && IsValidPort(settings.gatewayPort.Value))
+        {
+            savedGatewayPort = MigrateLegacyPort(settings.gatewayPort, 8765, DefaultGatewayPort);
+            migratedLegacyPorts |= settings.gatewayPort.Value == 8765;
+        }
+        gatewayPort = savedGatewayPort;
+        if (settings.tunnelClientPort.HasValue && IsValidPort(settings.tunnelClientPort.Value))
+        {
+            tunnelClientPort = MigrateLegacyPort(settings.tunnelClientPort, 8080, DefaultTunnelClientPort);
+            migratedLegacyPorts |= settings.tunnelClientPort.Value == 8080;
+        }
         browserAutoDetect = settings.browserAutoDetect ?? true;
         if (!String.IsNullOrWhiteSpace(settings.browserExecutablePath))
         {
@@ -696,7 +778,7 @@ internal sealed partial class ControlPanelRuntime
             try { RuntimeReliability.WriteAllTextAtomic(settingsPath, JsonSerializer.Serialize(settings), false); }
             catch (Exception ex) { LogRuntimeError("Recovered settings could not be restored atomically.", ex); }
         }
-        if (downgradePersistedFull) SaveSettings();
+        if (downgradePersistedFull || migratedLegacyPorts) SaveSettings();
     }
 
     private void SaveSettingsCore()
@@ -715,6 +797,8 @@ internal sealed partial class ControlPanelRuntime
         settings.browserExecutablePath = browserExecutablePath;
         settings.browserAutoDetect = browserAutoDetect;
         settings.onboardingCompleted = onboardingCompleted;
+        settings.gatewayPort = savedGatewayPort;
+        settings.tunnelClientPort = tunnelClientPort;
         RuntimeReliability.WriteAllTextAtomic(settingsPath, JsonSerializer.Serialize(settings), true);
     }
 
@@ -722,6 +806,111 @@ internal sealed partial class ControlPanelRuntime
     {
         try { SaveSettingsCore(); }
         catch (Exception ex) { LogRuntimeError("Settings save failed.", ex); }
+    }
+
+    private static bool IsPortAvailable(int port)
+    {
+        try
+        {
+            using (TcpListener listener = new TcpListener(IPAddress.Loopback, port))
+            {
+                listener.Start();
+                listener.Stop();
+                return true;
+            }
+        }
+        catch (SocketException) { return false; }
+    }
+
+    private async Task<bool> WaitForGatewayReadyAsync()
+    {
+        using (HttpClient client = new HttpClient())
+        {
+            client.Timeout = TimeSpan.FromSeconds(1);
+            DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                try
+                {
+                    using (HttpResponseMessage response = await client.GetAsync("http://127.0.0.1:" + gatewayPort + "/health"))
+                    {
+                        if (response.IsSuccessStatusCode) return true;
+                    }
+                }
+                catch { }
+                await Task.Delay(250);
+            }
+        }
+        return false;
+    }
+
+    private async void ApplyPortSettings()
+    {
+        int nextGatewayPort;
+        int nextTunnelPort;
+        if (!TryParsePort(Find<TextBox>("GatewayPortInput").Text, out nextGatewayPort) ||
+            !TryParsePort(Find<TextBox>("TunnelClientPortInput").Text, out nextTunnelPort))
+        {
+            ShowToast("Ports must be whole numbers between 1 and 65535.", true);
+            return;
+        }
+        if (HasValidGatewayPortOverride() && nextGatewayPort != gatewayPort)
+        {
+            ShowToast("DESKTOP_MCP_PORT overrides the saved Gateway port. Remove it to change this value.", true);
+            return;
+        }
+        if (nextGatewayPort != gatewayPort && !IsPortAvailable(nextGatewayPort))
+        {
+            ShowToast("Gateway port " + nextGatewayPort + " is already in use.", true);
+            return;
+        }
+        if (nextTunnelPort != tunnelClientPort && !IsPortAvailable(nextTunnelPort))
+        {
+            ShowToast("Tunnel Client port " + nextTunnelPort + " is already in use.", true);
+            return;
+        }
+        int previousGatewayPort = gatewayPort;
+        int previousSavedGatewayPort = savedGatewayPort;
+        int previousTunnelPort = tunnelClientPort;
+        if (!HasValidGatewayPortOverride()) savedGatewayPort = nextGatewayPort;
+        gatewayPort = nextGatewayPort;
+        tunnelClientPort = nextTunnelPort;
+        try { SaveSettingsCore(); }
+        catch (Exception ex)
+        {
+            gatewayPort = previousGatewayPort;
+            savedGatewayPort = previousSavedGatewayPort;
+            tunnelClientPort = previousTunnelPort;
+            LogRuntimeError("Port settings save failed.", ex);
+            ShowToast("Could not save port settings.", true);
+            return;
+        }
+        Button saveButton = Find<Button>("SavePortSettingsButton");
+        saveButton.IsEnabled = false;
+        try
+        {
+            bool gatewayChanged = previousGatewayPort != gatewayPort;
+            bool tunnelChanged = previousTunnelPort != tunnelClientPort;
+            if (gatewayChanged)
+            {
+                await Task.Run(delegate { RestartGateway(selectedProfile, previousGatewayPort); });
+                if (!await WaitForGatewayReadyAsync())
+                    throw new TimeoutException("Gateway did not become ready on port " + gatewayPort + ".");
+            }
+            if (gatewayChanged || tunnelChanged)
+            {
+                if (IsValidTunnelId(tunnelId))
+                    await Task.Run(delegate { ConfigureTunnelProfile(tunnelId); });
+                if (IsValidTunnelId(tunnelId) && HasTunnelKey()) ReconnectTunnel();
+            }
+            ShowToast("Port settings saved.", false);
+        }
+        catch (Exception ex)
+        {
+            LogRuntimeError("Port settings were saved, but a service restart failed.", ex);
+            ShowToast("Port settings saved, but a service restart failed: " + ex.Message, true);
+        }
+        finally { saveButton.IsEnabled = true; }
     }
 
     private bool GetSystemDarkMode()
@@ -1004,7 +1193,7 @@ internal sealed partial class ControlPanelRuntime
         string metricsText = null;
         try
         {
-            using (HttpResponseMessage response = StatusHttpClient.GetAsync("http://127.0.0.1:8080/readyz").GetAwaiter().GetResult())
+            using (HttpResponseMessage response = StatusHttpClient.GetAsync("http://127.0.0.1:" + tunnelClientPort + "/readyz").GetAwaiter().GetResult())
             {
                 readyOk = response.IsSuccessStatusCode;
                 readyBody = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
@@ -1013,7 +1202,7 @@ internal sealed partial class ControlPanelRuntime
         catch { }
         try
         {
-            using (HttpResponseMessage response = StatusHttpClient.GetAsync("http://127.0.0.1:8080/api/status").GetAwaiter().GetResult())
+            using (HttpResponseMessage response = StatusHttpClient.GetAsync("http://127.0.0.1:" + tunnelClientPort + "/api/status").GetAwaiter().GetResult())
             {
                 statusJson = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 if (response.StatusCode == HttpStatusCode.Unauthorized)
@@ -1023,11 +1212,11 @@ internal sealed partial class ControlPanelRuntime
         catch { }
         try
         {
-            using (HttpResponseMessage response = StatusHttpClient.GetAsync("http://127.0.0.1:8080/metrics").GetAwaiter().GetResult())
+            using (HttpResponseMessage response = StatusHttpClient.GetAsync("http://127.0.0.1:" + tunnelClientPort + "/metrics").GetAwaiter().GetResult())
                 if (response.IsSuccessStatusCode) metricsText = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
         }
         catch { }
-        return TunnelRuntimeStatusEvaluator.Evaluate(tunnelId, readyOk, readyBody, statusJson, metricsText, DateTimeOffset.UtcNow);
+        return TunnelRuntimeStatusEvaluator.Evaluate(tunnelId, readyOk, readyBody, statusJson, metricsText, DateTimeOffset.UtcNow, gatewayPort);
     }
 
     private bool IsTunnelReady()
@@ -1047,23 +1236,34 @@ internal sealed partial class ControlPanelRuntime
         return psi;
     }
 
-    private void StopGateway()
+    private void StopGateway(int? portOverride = null)
     {
-        Process owned = gatewayProcess;
-        gatewayProcess = null;
+        Process owned;
+        lock (gatewayProcessSync)
+        {
+            owned = gatewayProcess;
+            gatewayProcess = null;
+        }
         gatewayUnhealthySince = DateTime.MinValue;
         try
         {
-            Process p = Process.Start(NewHiddenProcess(nodePath, "dist\\src\\stop.js " + gatewayPort));
-            if (p != null)
+            Process stop = Process.Start(NewHiddenProcess(nodePath, "dist\\src\\stop.js " + (portOverride ?? gatewayPort)));
+            if (stop != null)
             {
-                try { if (!p.WaitForExit(5000)) p.Kill(true); }
-                finally { p.Dispose(); }
+                try { if (!stop.WaitForExit(5000)) stop.Kill(true); }
+                finally { stop.Dispose(); }
             }
-            if (owned != null && !owned.HasExited && !owned.WaitForExit(5000))
+            if (owned != null)
             {
-                owned.Kill(true);
-                owned.WaitForExit(5000);
+                try
+                {
+                    if (!owned.HasExited && !owned.WaitForExit(5000))
+                    {
+                        try { owned.Kill(true); } catch (InvalidOperationException) { }
+                        try { owned.WaitForExit(5000); } catch (InvalidOperationException) { }
+                    }
+                }
+                catch (InvalidOperationException) { }
             }
         }
         catch (Exception ex) { LogRuntimeError("Gateway stop required force cleanup or failed.", ex); }
@@ -1075,7 +1275,11 @@ internal sealed partial class ControlPanelRuntime
 
     private bool OwnedGatewayRunning()
     {
-        try { return gatewayProcess != null && !gatewayProcess.HasExited; } catch { return false; }
+        lock (gatewayProcessSync)
+        {
+            try { return gatewayProcess != null && !gatewayProcess.HasExited; }
+            catch (InvalidOperationException) { return false; }
+        }
     }
 
     private void StartGateway(string profile)
@@ -1092,31 +1296,54 @@ internal sealed partial class ControlPanelRuntime
         ApplyBrowserExecutableEnvironment(psi, ResolveBrowserExecutableForGateway(), null);
         Process p = Process.Start(psi);
         if (p == null) throw new InvalidOperationException("Could not start DeskMCP Gateway.");
-        gatewayProcess = p;
-        gatewayUnhealthySince = DateTime.UtcNow;
-        p.EnableRaisingEvents = true;
         p.Exited += delegate
         {
             try
             {
                 window.Dispatcher.BeginInvoke(new Action(delegate
                 {
-                    if (!Object.ReferenceEquals(gatewayProcess, p)) return;
-                    gatewayProcess = null;
+                    bool ownsProcess = false;
+                    lock (gatewayProcessSync)
+                    {
+                        if (Object.ReferenceEquals(gatewayProcess, p))
+                        {
+                            gatewayProcess = null;
+                            ownsProcess = true;
+                        }
+                    }
+                    if (!ownsProcess) return;
                     gatewayStartInFlight = false;
                     gatewayUnhealthySince = DateTime.MinValue;
                     ScheduleGatewayRetry();
                     UpdateStatus();
+                    try { p.Dispose(); } catch { }
                 }));
             }
-            catch { if (Object.ReferenceEquals(gatewayProcess, p)) gatewayProcess = null; }
-            finally { try { p.Dispose(); } catch { } }
+            catch
+            {
+                bool ownsProcess = false;
+                lock (gatewayProcessSync)
+                {
+                    if (Object.ReferenceEquals(gatewayProcess, p))
+                    {
+                        gatewayProcess = null;
+                        ownsProcess = true;
+                    }
+                }
+                if (ownsProcess) { try { p.Dispose(); } catch { } }
+            }
         };
+        lock (gatewayProcessSync)
+        {
+            gatewayProcess = p;
+            p.EnableRaisingEvents = true;
+        }
+        gatewayUnhealthySince = DateTime.UtcNow;
     }
 
-    private void RestartGateway(string profile)
+    private void RestartGateway(string profile, int? stopPort = null)
     {
-        StopGateway();
+        StopGateway(stopPort);
         System.Threading.Thread.Sleep(450);
         StartGateway(profile);
     }
@@ -2281,11 +2508,12 @@ internal sealed partial class ControlPanelRuntime
         if (!detachedStopped)
             throw new InvalidOperationException("A detached DeskMCP tunnel could not be safely replaced.");
         string profileId = TryLoadTunnelIdFromProfile();
-        if (!String.Equals(profileId, tunnelId, StringComparison.Ordinal)) ConfigureTunnelProfile(tunnelId);
+        if (!existing.EndpointMatchesExpected || !String.Equals(profileId, tunnelId, StringComparison.Ordinal)) ConfigureTunnelProfile(tunnelId);
         string key = LoadTunnelKey();
         if (String.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Tunnel Runtime Key is empty.");
         ProcessStartInfo psi = NewHiddenProcess(tunnelClientPath, "run --profile desktop-mcp");
         psi.EnvironmentVariables["CONTROL_PLANE_API_KEY"] = key;
+        psi.EnvironmentVariables["HEALTH_LISTEN_ADDR"] = "127.0.0.1:" + tunnelClientPort;
         try
         {
             Process p = Process.Start(psi);
@@ -2971,6 +3199,7 @@ internal sealed partial class ControlPanelRuntime
         Find<Button>("TunnelSetupCancelButton").Click += delegate { HideTunnelSetupOverlay(); };
         Find<Button>("TunnelSetupSaveButton").Click += delegate { SaveTunnelSetup(); };
         Find<Button>("TunnelReconnectButton").Click += delegate { ReconnectTunnel(); };
+        Find<Button>("SavePortSettingsButton").Click += delegate { ApplyPortSettings(); };
         Find<Button>("UpdateButton").Click += delegate { HandleUpdateButton(); };
         Find<Button>("SettingsButton").Click += delegate { ToggleSettings(); };
         Find<Button>("SettingsBackButton").Click += delegate { if (settingsExpanded) ToggleSettings(); };
@@ -3260,7 +3489,7 @@ internal sealed partial class ControlPanelRuntime
         open.Click += delegate { UpdateStatus(); AnimateShow(); };
         restart.Click += delegate { RestartGatewayAsync(selectedProfile); };
         stop.Click += delegate { StopGatewayAsync(); };
-        tunnel.Click += delegate { OpenPath("http://127.0.0.1:8080/ui"); };
+        tunnel.Click += delegate { OpenPath("http://127.0.0.1:" + tunnelClientPort + "/ui"); };
         bindAgentDesktop.Click += delegate { BindCurrentAgentDesktop(); };
         manageAgentDesktops.Click += delegate
         {
@@ -3543,6 +3772,8 @@ internal static class Program
                 return AgentDesktopControlCoordinator.RunBindingSelfTest();
             if (args.Length > 0 && args[0] == "--browser-settings-self-test")
                 return ControlPanelRuntime.RunBrowserSettingsSelfTest();
+            if (args.Length > 0 && args[0] == "--port-settings-self-test")
+                return ControlPanelRuntime.RunPortSettingsSelfTest();
             if (args.Length == 4 && args[0] == "--agent-control-lock-hold")
                 return CrossProcessDirectoryLock.HoldForInterop(args[1], args[2], args[3]);
             if (args.Length == 2 && args[0] == "--agent-control-lock-try")

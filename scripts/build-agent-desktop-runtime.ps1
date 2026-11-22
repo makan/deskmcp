@@ -25,7 +25,12 @@ function Get-PeMachine([string]$Path) {
 $localDotnet = Join-Path $RuntimeRoot 'tooling\dotnet\dotnet.exe'
 if (-not (Test-Path -LiteralPath $localDotnet)) { $localDotnet = Join-Path $RuntimeRoot 'dotnet-sdk\dotnet.exe' }
 $dotnet = if (Test-Path -LiteralPath $localDotnet) { $localDotnet } else { (Get-Command dotnet.exe -ErrorAction Stop).Source }
-$cargo = (Get-Command cargo.exe -ErrorAction Stop).Source
+$cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue
+$cargo = if ($cargoCommand) { $cargoCommand.Source } else { Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe' }
+$rustupCommand = Get-Command rustup.exe -ErrorAction SilentlyContinue
+$rustup = if ($rustupCommand) { $rustupCommand.Source } else { Join-Path $env:USERPROFILE '.cargo\bin\rustup.exe' }
+Require (Test-Path -LiteralPath $cargo) ('Cargo executable is missing: ' + $cargo)
+Require (Test-Path -LiteralPath $rustup) ('Rustup executable is missing: ' + $rustup)
 $git = (Get-Command git.exe -ErrorAction Stop).Source
 Require (Test-Path -LiteralPath $HostProject) 'Agent Desktop Host project is missing.'
 
@@ -47,9 +52,16 @@ try {
     $dirty = (& $git status --porcelain) -join "`n"
     Require ([string]::IsNullOrWhiteSpace($dirty)) 'VirtualDesktopAccessor source tree changed during preparation.'
 
-    $installedTargets = @(& rustup target list --installed 2>$null)
+    $installedTargets = @(& $rustup target list --installed 2>$null)
     Require ($installedTargets -contains $RustTarget) ('Rust target is not installed: ' + $RustTarget)
+    $previousRustFlags = $env:RUSTFLAGS
+    try {
+        $env:RUSTFLAGS = (($previousRustFlags + ' -C target-feature=+crt-static').Trim())
     Invoke-Native $cargo @('build','--manifest-path','dll\Cargo.toml','--release','--locked','--target',$RustTarget)
+    } finally {
+        if ($null -eq $previousRustFlags) { Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue }
+        else { $env:RUSTFLAGS = $previousRustFlags }
+    }
 } finally { Pop-Location }
 
 $VdaDll = Join-Path $VdaSource ('target\' + $RustTarget + '\release\VirtualDesktopAccessor.dll')

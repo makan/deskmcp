@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { DEFAULT_GATEWAY_PORT } from './ports.js';
 import http, { type Server as HttpServer } from 'node:http';
 import {
   localhostHostValidation,
@@ -180,7 +181,7 @@ async function serveSignedArtifact(
 
 export async function startHttpServer(
   host = '127.0.0.1',
-  port = 8765,
+  port = DEFAULT_GATEWAY_PORT,
   bridge?: DesktopBackendBridge,
   policy?: DesktopPolicy,
   audit?: AuditLogger,

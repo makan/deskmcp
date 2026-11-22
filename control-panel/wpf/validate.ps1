@@ -20,6 +20,7 @@ $selfTests = @(
     @{ Arg='--agent-control-lock-self-test'; Label='AGENT_CONTROL_LOCK_SELF_TEST' },
     @{ Arg='--agent-desktop-binding-self-test'; Label='AGENT_DESKTOP_BINDING_SELF_TEST' },
     @{ Arg='--browser-settings-self-test'; Label='BROWSER_SETTINGS_SELF_TEST' },
+    @{ Arg='--port-settings-self-test'; Label='PORT_SETTINGS_SELF_TEST' },
     @{ Arg='--update-security-self-test'; Label='UPDATE_SECURITY_SELF_TEST' }
 )
 foreach ($entry in $selfTests) {

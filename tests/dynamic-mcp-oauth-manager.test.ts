@@ -102,7 +102,7 @@ test('OAuth manager discovers maximum resource scopes, validates state, and stor
   base = running.base;
   try {
     const manager = new DynamicMcpOAuthManager('unused-test-root', new MemorySecretStore());
-    manager.setCallbackBaseUrl('http://127.0.0.1:8765');
+    manager.setCallbackBaseUrl('http://127.0.0.1:8120');
     const target = {
       name: 'oauth-test',
       url: `${base}/mcp`,
@@ -112,7 +112,7 @@ test('OAuth manager discovers maximum resource scopes, validates state, and stor
     const started = await manager.start(target, {});
     assert.equal(started.status, 'authorization_required');
     assert.ok(started.authorization_url);
-    assert.equal(registeredRedirect, 'http://127.0.0.1:8765/oauth/callback/oauth-test');
+    assert.equal(registeredRedirect, 'http://127.0.0.1:8120/oauth/callback/oauth-test');
 
     const authorization = new URL(started.authorization_url!);
     const requestedScopes = new Set((authorization.searchParams.get('scope') ?? '').split(/\s+/u));
@@ -208,7 +208,7 @@ test('OAuth manager bypasses dynamic registration for a static client and posts 
   process.env[envName] = 'static-client-secret';
   try {
     const manager = new DynamicMcpOAuthManager('unused-test-root', new MemorySecretStore());
-    manager.setCallbackBaseUrl('http://127.0.0.1:8765');
+    manager.setCallbackBaseUrl('http://127.0.0.1:8120');
     const target = {
       name: 'static-oauth-test',
       url: `${base}/mcp`,

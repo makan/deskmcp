@@ -17,7 +17,7 @@ internal static class TunnelRuntimeStatusEvaluator
 {
     private static readonly TimeSpan PollFreshness = TimeSpan.FromSeconds(90);
 
-    public static TunnelRuntimeStatus Evaluate(string expectedTunnelId, bool readyRequestOk, string readyBody, string statusJson, string metricsText, DateTimeOffset now)
+    public static TunnelRuntimeStatus Evaluate(string expectedTunnelId, bool readyRequestOk, string readyBody, string statusJson, string metricsText, DateTimeOffset now, int expectedGatewayPort = ControlPanelRuntime.DefaultGatewayPort)
     {
         TunnelRuntimeStatus result = new TunnelRuntimeStatus { Detail = "Local tunnel is not ready." };
         result.LocalReady = readyRequestOk && String.Equals((readyBody ?? "").Trim(), "ready", StringComparison.OrdinalIgnoreCase);
@@ -39,7 +39,7 @@ internal static class TunnelRuntimeStatusEvaluator
             {
                 JsonElement root = document.RootElement;
                 string mcpServerUrl = ReadString(root, "mcp_server_url");
-                result.EndpointMatchesExpected = String.Equals(mcpServerUrl, "http://127.0.0.1:8765/mcp", StringComparison.OrdinalIgnoreCase);
+                result.EndpointMatchesExpected = String.Equals(mcpServerUrl, "http://127.0.0.1:" + expectedGatewayPort + "/mcp", StringComparison.OrdinalIgnoreCase);
                 if (!result.EndpointMatchesExpected)
                 {
                     result.Detail = "The running tunnel belongs to a different MCP endpoint.";
@@ -153,12 +153,12 @@ internal static class TunnelRuntimeStatusEvaluator
     {
         string id = "tunnel_" + new string('0', 32);
         DateTimeOffset now = DateTimeOffset.FromUnixTimeSeconds(2000);
-        string goodStatus = "{\"control_plane_tunnel_id\":\"" + id + "\",\"mcp_server_url\":\"http://127.0.0.1:8765/mcp\",\"tunnel_metadata\":{\"ID\":\"" + id + "\"}}";
+        string goodStatus = "{\"control_plane_tunnel_id\":\"" + id + "\",\"mcp_server_url\":\"http://127.0.0.1:8120/mcp\",\"tunnel_metadata\":{\"ID\":\"" + id + "\"}}";
         string goodMetrics = "commands_poll_last_successful_timestamp_seconds 1995";
         TunnelRuntimeStatus good = Evaluate(id, true, "ready", goodStatus, goodMetrics, now);
         if (!good.Ready) return 11;
 
-        string rejectedStatus = "{\"control_plane_tunnel_id\":\"" + id + "\",\"mcp_server_url\":\"http://127.0.0.1:8765/mcp\",\"tunnel_metadata_error\":\"status 401: invalid_api_key\"}";
+        string rejectedStatus = "{\"control_plane_tunnel_id\":\"" + id + "\",\"mcp_server_url\":\"http://127.0.0.1:8120/mcp\",\"tunnel_metadata_error\":\"status 401: invalid_api_key\"}";
         TunnelRuntimeStatus rejected = Evaluate(id, true, "ready", rejectedStatus, goodMetrics, now);
         if (rejected.Ready || !rejected.CredentialRejected) return 12;
 

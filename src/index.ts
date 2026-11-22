@@ -20,14 +20,11 @@ import {
 } from './process-session-registry.js';
 import { SkillStore } from './skill-store.js';
 import { TaskContextStore } from './task-context.js';
+import { DEFAULT_GATEWAY_PORT, resolveGatewayPort } from './ports.js';
 
 const host = '127.0.0.1';
-const rawPort = process.env.DESKTOP_MCP_PORT ?? '8765';
-const port = Number.parseInt(rawPort, 10);
-
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  throw new Error(`Invalid DESKTOP_MCP_PORT: ${rawPort}`);
-}
+const rawPort = process.env.DESKTOP_MCP_PORT ?? String(DEFAULT_GATEWAY_PORT);
+const port = resolveGatewayPort(rawPort);
 
 const audit = new AuditLogger();
 await audit.init();

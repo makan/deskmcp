@@ -1,4 +1,5 @@
 import AppKit
+import DeskMCPCore
 import SwiftUI
 
 struct PanelView: View {
@@ -6,6 +7,8 @@ struct PanelView: View {
     @State private var showTunnel = false
     @State private var showFullWarning = false
     @State private var showUnlockWarning = false
+    @State private var gatewayPortText = String(DeskMCPServicePorts.defaultGatewayPort)
+    @State private var tunnelClientPortText = String(DeskMCPServicePorts.defaultTunnelClientPort)
 
     var body: some View {
         VStack(spacing: 16) {
@@ -137,10 +140,26 @@ struct PanelView: View {
                 get: { model.startAtLogin },
                 set: { model.setStartAtLogin($0) }
             ))
+
             Toggle("Start Tunnel automatically", isOn: Binding(
                 get: { model.autoStartTunnel },
                 set: { model.setTunnelAutoStart($0) }
             ))
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Service Ports").font(.headline)
+                TextField("Gateway Port", text: $gatewayPortText).textFieldStyle(.roundedBorder)
+                TextField("Tunnel Client Port", text: $tunnelClientPortText).textFieldStyle(.roundedBorder)
+                Button("Save Ports & Restart Services") {
+                    model.savePorts(gatewayPortText: gatewayPortText, tunnelClientPortText: tunnelClientPortText)
+                }
+                .buttonStyle(.bordered)
+            }
+            .onAppear {
+                gatewayPortText = String(model.gatewayPort)
+                tunnelClientPortText = String(model.tunnelClientPort)
+            }
+
             HStack {
                 if let message = model.message {
                     Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(2)

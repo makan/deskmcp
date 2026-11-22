@@ -288,6 +288,17 @@
                   <Button Grid.Column="1" x:Name="WorkspaceChangeButton" Style="{StaticResource MiniButton}" Content="Change" Padding="12,7"/>
                 </Grid>
               </Border>
+              <Border x:Name="PortSettingsCard" Background="#F5F5F7" CornerRadius="18" Padding="12" Margin="0,0,0,10">
+                <StackPanel>
+                  <TextBlock Text="Service Ports" Foreground="#18181B" FontSize="11" FontWeight="SemiBold"/>
+                  <TextBlock Text="Gateway and local Tunnel Client ports" Foreground="#8E8E93" FontSize="9" Margin="0,2,0,8"/>
+                  <TextBlock Text="Gateway Port" Foreground="#8E8E93" FontSize="9"/>
+                  <TextBox x:Name="GatewayPortInput" Style="{StaticResource RoundedTextBox}" FontSize="11" Padding="9,7" Margin="0,3,0,8"/>
+                  <TextBlock Text="Tunnel Client Port" Foreground="#8E8E93" FontSize="9"/>
+                  <TextBox x:Name="TunnelClientPortInput" Style="{StaticResource RoundedTextBox}" FontSize="11" Padding="9,7" Margin="0,3,0,8"/>
+                  <Button x:Name="SavePortSettingsButton" Style="{StaticResource MiniButton}" Content="Save Ports &amp; Restart Services"/>
+                </StackPanel>
+              </Border>
               <Border x:Name="RecentCard" Visibility="Collapsed" Background="#F5F5F7" CornerRadius="18" Padding="12" Margin="0,0,0,10">
                 <StackPanel>
                   <TextBlock x:Name="RecentLabel" Text="Recent Workspaces" Foreground="#8E8E93" FontSize="10" Margin="0,0,0,6"/>

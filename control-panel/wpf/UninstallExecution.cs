@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using Microsoft.Win32;
 using System.Windows.Forms;
@@ -81,8 +82,22 @@ internal static class UninstallExecution
     private static string ResolveGatewayPortArgument()
     {
         string raw = Environment.GetEnvironmentVariable("DESKTOP_MCP_PORT");
-        if (String.IsNullOrWhiteSpace(raw)) return "8765";
-        if (!Int32.TryParse(raw, out int port) || port < 1 || port > 65535) return "8765";
+        if (String.IsNullOrWhiteSpace(raw))
+        {
+            string settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopMCP", "settings.json");
+            try
+            {
+                using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(settingsPath)))
+                {
+                    JsonElement value;
+                    if (document.RootElement.TryGetProperty("gatewayPort", out value) && value.TryGetInt32(out int saved) && saved >= 1 && saved <= 65535)
+                        return saved.ToString();
+                }
+            }
+            catch { }
+            return ControlPanelRuntime.DefaultGatewayPort.ToString();
+        }
+        if (!Int32.TryParse(raw, out int port) || port < 1 || port > 65535) return ControlPanelRuntime.DefaultGatewayPort.ToString();
         return port.ToString();
     }
 

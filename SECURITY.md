@@ -25,7 +25,7 @@ DeskMCP is designed around a local trust boundary:
 
 The updater threat model and rollback/recovery contract are documented in [`docs/UPDATE_SECURITY.md`](docs/UPDATE_SECURITY.md).
 
-Do not expose port `8765` directly to a LAN or the public Internet.
+Do not expose the configured Gateway Port (default `8120`) or Tunnel Client Port (default `8888`) directly to a LAN or the public Internet.
 
 ## Reporting a vulnerability
 

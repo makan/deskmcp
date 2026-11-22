@@ -16,7 +16,7 @@ A missing Authenticode signature is different from a hash mismatch. **Do not run
 4. If it remains **Offline**, click **Start Gateway** or **Restart Gateway**.
 5. If rebuilding from source, quit the running release-stage DeskMCP first; the build scripts intentionally refuse to modify a live stage.
 
-The Gateway health endpoint is local-only at `127.0.0.1:8765`. After startup, `desktopRuntime.startupTiming` reports non-sensitive phase timings for entry access, MCP connect, tool listing, required-tool validation, and total bridge startup.
+The Gateway health endpoint is local-only at `127.0.0.1:8120`. After startup, `desktopRuntime.startupTiming` reports non-sensitive phase timings for entry access, MCP connect, tool listing, required-tool validation, and total bridge startup.
 
 For source-level startup diagnostics, build first and run `node scripts/measure-startup.mjs --samples 10`. Each sample uses a fresh Node/DeskMCP backend process, while warm latency is measured on the already-connected bridge. The script does not flush OS caches or kill unrelated processes.
 

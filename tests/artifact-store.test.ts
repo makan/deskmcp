@@ -20,7 +20,7 @@ async function withArtifactFixture(run: (args: {
     await import('node:fs/promises').then(fs => fs.mkdir(workspace, { recursive: true }));
     const store = new ArtifactStore(artifactRoot);
     await store.init();
-    store.setLocalBaseUrl('http://127.0.0.1:8765');
+    store.setLocalBaseUrl('http://127.0.0.1:8120');
     const policy = await DesktopPolicy.create({
       profile: 'workspace-write',
       allowedRoots: [workspace]
@@ -40,7 +40,7 @@ test('artifact publish copies a policy-approved file and verifies checksum on re
     assert.equal(artifact.filename, 'report.txt');
     assert.equal(artifact.mime_type, 'text/plain; charset=utf-8');
     assert.equal(artifact.url_scope, 'local');
-    assert.match(artifact.url ?? '', /^http:\/\/127\.0\.0\.1:8765\/artifacts\/public\//u);
+    assert.match(artifact.url ?? '', /^http:\/\/127\.0\.0\.1:8120\/artifacts\/public\//u);
 
     const copied = await readFile(path.join(artifactRoot, artifact.artifact_id, 'payload'), 'utf8');
     assert.equal(copied, 'artifact payload\n');
@@ -112,18 +112,18 @@ test('configured artifact base URL requires HTTPS for non-loopback hosts and rej
     () => new ArtifactStore(root, 'https://user:secret@example.com/artifacts'),
     /must not contain URL credentials/i
   );
-  assert.doesNotThrow(() => new ArtifactStore(root, 'http://localhost:8765'));
-  assert.doesNotThrow(() => new ArtifactStore(root, 'http://127.0.0.2:8765'));
+  assert.doesNotThrow(() => new ArtifactStore(root, 'http://localhost:8120'));
+  assert.doesNotThrow(() => new ArtifactStore(root, 'http://127.0.0.2:8120'));
   assert.doesNotThrow(() => new ArtifactStore(root, 'https://example.com/artifacts'));
 });
 
 test('local artifact base URL also rejects non-loopback HTTP', () => {
   const store = new ArtifactStore(path.join(os.tmpdir(), 'deskmcp-artifact-local-url-policy'));
   assert.throws(
-    () => store.setLocalBaseUrl('http://192.168.1.20:8765'),
+    () => store.setLocalBaseUrl('http://192.168.1.20:8120'),
     /HTTP only for loopback hosts|remote artifact URLs require HTTPS/i
   );
-  assert.doesNotThrow(() => store.setLocalBaseUrl('http://[::1]:8765'));
+  assert.doesNotThrow(() => store.setLocalBaseUrl('http://[::1]:8120'));
 });
 
 test('artifact store byte budget is enforced across concurrent Store instances', async () => {

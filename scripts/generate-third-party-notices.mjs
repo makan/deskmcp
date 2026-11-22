@@ -9,6 +9,8 @@ const sourceLicenses = path.join(projectRoot, 'licenses');
 const stageLicenses = path.join(stageRoot, 'licenses');
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).version;
 const target = process.argv[4] ?? 'win-x64';
+const writeCanonical = process.argv[6] === '--write-canonical';
+if (writeCanonical && target !== 'win-x64') throw new Error('--write-canonical is only supported for win-x64.');
 const nodeVersion = process.argv[5] ?? process.version.replace(/^v/, '');
 const isMac = target === 'darwin-arm64';
 const sharpPackage = isMac ? 'sharp-darwin-arm64' : target === 'win-arm64' ? 'sharp-win32-arm64' : 'sharp-win32-x64';
@@ -86,7 +88,7 @@ for (const row of rows) {
   ].map(csvCell).join(','));
 }
 const csvText = `${csvLines.join('\r\n')}\r\n`;
-if (target === 'win-x64') {
+if (target === 'win-x64' && !writeCanonical) {
   requireCanonicalGeneratedText(
     path.join(sourceLicenses, 'production-node-packages.csv'),
     csvText,
@@ -94,6 +96,7 @@ if (target === 'win-x64') {
   );
 }
 fs.writeFileSync(path.join(stageLicenses, 'production-node-packages.csv'), csvText);
+if (writeCanonical) fs.writeFileSync(path.join(sourceLicenses, 'production-node-packages.csv'), csvText);
 
 const buffersMit = `MIT License\n\nCopyright (c) 2015 James Halliday\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the "Software"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is furnished\nto do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n`;
 if (target === 'win-x64') {
@@ -109,6 +112,9 @@ const unresolved = rows.filter(row => row.license === 'UNKNOWN');
 if (unresolved.length) {
   throw new Error(`Unresolved package licenses: ${unresolved.map(row => `${row.name}@${row.version}`).join(', ')}`);
 }
+const sharpRow = rows.find(row => row.name === `@img/${sharpPackage}`);
+if (!sharpRow) throw new Error(`Target sharp package is missing from the production inventory: @img/${sharpPackage}`);
+const sharpVersion = sharpRow.version;
 const special = rows.filter(row => /LGPL|GPL|MPL|UNKNOWN|manual resolution/i.test(row.license));
 const counts = new Map();
 for (const row of rows) counts.set(row.license, (counts.get(row.license) ?? 0) + 1);
@@ -128,7 +134,7 @@ winAppNotice +
 virtualDesktopNotice +
 `- **OpenAI tunnel-client v0.0.13** — Apache-2.0; its upstream \`LICENSE\`, \`NOTICE\`, third-party licenses text, and SPDX document remain under \`tunnel-client/v0.0.13/bin/\`.\n` +
 `- **@wonderwhy-er/desktop-commander 0.2.47** — MIT. Its package-local license remains in the bundled production \`node_modules\`.\n` +
-`- **${sharpPackage} 0.35.4** — package metadata declares Apache-2.0 AND LGPL-3.0-or-later. Its package-local LICENSE and README, including the bundled libvips/native-library license table, remain in the release.\n\n` +
+`- **${sharpPackage} ${sharpVersion}** — package metadata declares Apache-2.0 AND LGPL-3.0-or-later. Its package-local LICENSE and README, including the bundled libvips/native-library license table, remain in the release.\n\n` +
 `## Manual license resolution\n\n` +
 `### buffers 0.1.1\n\n` +
 `The npm package metadata does not declare a license and the published tarball contains no LICENSE file. ` +
@@ -143,7 +149,7 @@ virtualDesktopNotice +
 `License expressions requiring special attention or explicit choice:\n${specialLines}\n\n` +
 `## Preservation rule\n\n` +
 `Do not strip package-local LICENSE, NOTICE, COPYING, COPYRIGHT, README license tables, Node's LICENSE, platform runtime notices, WinApp CLI's MIT notice, VirtualDesktopAccessor's MIT/provenance/checksum files, or tunnel-client notice/SPDX files when optimizing a release payload.\n`;
-if (target === 'win-x64') {
+if (target === 'win-x64' && !writeCanonical) {
   requireCanonicalGeneratedText(
     path.join(projectRoot, 'THIRD_PARTY_NOTICES.md'),
     notices,
@@ -152,6 +158,7 @@ if (target === 'win-x64') {
 }
 fs.writeFileSync(path.join(stageLicenses, 'THIRD_PARTY_NOTICES.md'), notices);
 fs.writeFileSync(path.join(stageRoot, 'THIRD_PARTY_NOTICES.md'), notices);
+if (writeCanonical) fs.writeFileSync(path.join(projectRoot, 'THIRD_PARTY_NOTICES.md'), notices);
 console.log(`THIRD_PARTY_PACKAGES=${rows.length}`);
 console.log(`SPECIAL_LICENSE_PACKAGES=${special.length}`);
 console.log('THIRD_PARTY_NOTICES_OK');
