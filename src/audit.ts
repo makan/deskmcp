@@ -46,6 +46,11 @@ const AUDIT_LOCK_INITIALIZATION_GRACE_MS = 5_000;
 export class AuditLogger {
   readonly filePath: string;
   private writeChain: Promise<void> = Promise.resolve();
+  private receivedCommandCount = 0;
+
+  get commandCount(): number {
+    return this.receivedCommandCount;
+  }
 
   constructor(
     filePath = process.env.DESKTOP_MCP_AUDIT_LOG
@@ -124,6 +129,7 @@ export class AuditLogger {
     profile: PermissionProfile,
     target?: string
   ): Promise<AuditOperation> {
+    if (tool !== 'gateway_owned_process_cleanup') this.receivedCommandCount++;
     const operation: AuditOperation = {
       requestId: randomUUID(),
       startedAt: performance.now(),

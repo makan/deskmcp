@@ -31,6 +31,7 @@ using Forms = System.Windows.Forms;
 internal sealed class HealthInfo
 {
     public string version { get; set; }
+    public int commandCount { get; set; }
     public DesktopRuntimeHealthInfo desktopRuntime { get; set; }
     public PolicyInfo policy { get; set; }
 }
@@ -1630,6 +1631,7 @@ internal sealed partial class ControlPanelRuntime
     private void ApplyStatus(HealthInfo health, TunnelRuntimeStatus tunnelStatus)
     {
         statusInitialized = true;
+        Find<TextBlock>("CommandCountText").Text = (health == null ? 0 : Math.Max(0, health.commandCount)).ToString() + " commands";
         lastTunnelStatus = tunnelStatus ?? new TunnelRuntimeStatus();
         bool tunnelReady = lastTunnelStatus.Ready;
         gatewayIsRunning = health != null;

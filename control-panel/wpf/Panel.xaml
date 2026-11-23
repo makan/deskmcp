@@ -162,9 +162,12 @@
               <TextBlock x:Name="BrandSubtitle" Text="Your desktop. Connected to AI." Foreground="#A1A1AA" FontSize="11" Margin="0,3,0,0"/>
             </StackPanel>
             <Border Grid.Column="3" x:Name="LivePill" Background="#FF214A30" BorderBrush="#FF2B5C3C" BorderThickness="1" CornerRadius="12" Padding="10,5" VerticalAlignment="Top">
-              <StackPanel Orientation="Horizontal">
-                <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="#34C759" Margin="0,0,6,0"/>
-                <TextBlock x:Name="LiveText" Text="Live" Foreground="#D9FFE3" FontSize="11" FontWeight="SemiBold"/>
+              <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                  <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="#34C759" Margin="0,0,6,0"/>
+                  <TextBlock x:Name="LiveText" Text="Live" Foreground="#D9FFE3" FontSize="11" FontWeight="SemiBold"/>
+                </StackPanel>
+                <TextBlock x:Name="CommandCountText" Text="0 commands" Foreground="#B9DCC4" FontSize="9" HorizontalAlignment="Center" Margin="0,3,0,0"/>
               </StackPanel>
             </Border>
           </Grid>

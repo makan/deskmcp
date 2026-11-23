@@ -11,6 +11,20 @@ function parseRecords(text: string): AuditRecord[] {
   return text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as AuditRecord);
 }
 
+test('AuditLogger command counter starts at zero and excludes internal cleanup', async () => {
+  const audit = new AuditLogger(path.join(TEST_AREA, 'audit-command-count.jsonl'));
+  await audit.init();
+  assert.equal(audit.commandCount, 0);
+  const cleanup = await audit.begin('gateway_owned_process_cleanup', 'process', 'read-only');
+  await audit.finish(cleanup, 'allow');
+  assert.equal(audit.commandCount, 0);
+  const command = await audit.begin('desktop_read_file', 'read', 'read-only');
+  await audit.finish(command, 'allow');
+  assert.equal(audit.commandCount, 1);
+  await rm(audit.filePath, { force: true });
+});
+
+
 test('AuditLogger writes paired metadata-only JSONL records', async () => {
   await rm(auditPath, { force: true });
   const audit = new AuditLogger(auditPath);
@@ -25,6 +39,7 @@ test('AuditLogger writes paired metadata-only JSONL records', async () => {
     'desktop_write_file', 'write', 'workspace-write', 'C:\\safe\\blocked.txt'
   );
   await audit.finish(denied, 'deny', new Error('SECRET_CONTENT_MUST_NOT_APPEAR'));
+  assert.equal(audit.commandCount, 2);
 
   const text = await readFile(auditPath, 'utf8');
   const records = parseRecords(text);

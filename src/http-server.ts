@@ -239,6 +239,7 @@ export async function startHttpServer(
         ok: true,
         name: SERVER_NAME,
         version: SERVER_VERSION,
+        commandCount: audit?.commandCount ?? 0,
         mode: bridge ? 'desktop-runtime' : 'safe-test',
         desktopRuntime: publicDesktopRuntimeInfo(bridge),
         policy: publicPolicyInfo(policy),
