@@ -237,6 +237,13 @@ internal sealed partial class ControlPanelRuntime
         return !String.IsNullOrWhiteSpace(raw) && TryParsePort(raw, out port);
     }
 
+    // Gateway port actually in effect: a valid DESKTOP_MCP_PORT overrides the saved value.
+    private static bool PortsConflict(int savedGatewayPort, int tunnelPort)
+    {
+        int effectiveGatewayPort = HasValidGatewayPortOverride() ? ResolveGatewayPort(savedGatewayPort) : savedGatewayPort;
+        return effectiveGatewayPort == tunnelPort;
+    }
+
     internal static int RunPortSettingsSelfTest()
     {
         string previous = Environment.GetEnvironmentVariable("DESKTOP_MCP_PORT");
@@ -253,8 +260,11 @@ internal sealed partial class ControlPanelRuntime
             PanelSettings persisted = new PanelSettings { theme = "dark", gatewayPort = DefaultGatewayPort, tunnelClientPort = DefaultTunnelClientPort };
             PanelSettings restored = JsonSerializer.Deserialize<PanelSettings>(JsonSerializer.Serialize(persisted));
             if (restored == null || restored.theme != "dark" || restored.gatewayPort != DefaultGatewayPort || restored.tunnelClientPort != DefaultTunnelClientPort) return 5;
+            if (PortsConflict(DefaultGatewayPort, DefaultTunnelClientPort) || !PortsConflict(9000, 9000)) return 7;
             Environment.SetEnvironmentVariable("DESKTOP_MCP_PORT", "54321");
             if (ResolveGatewayPort(1234) != 54321) return 3;
+            // Override case: the effective Gateway port (54321) is compared, not the saved one.
+            if (!PortsConflict(1234, 54321) || PortsConflict(54321, DefaultTunnelClientPort) || PortsConflict(DefaultTunnelClientPort, DefaultTunnelClientPort)) return 8;
             Environment.SetEnvironmentVariable("DESKTOP_MCP_PORT", "invalid");
             try { ResolveGatewayPort(DefaultGatewayPort); return 4; }
             catch (InvalidOperationException) { }
@@ -348,7 +358,15 @@ internal sealed partial class ControlPanelRuntime
         themeIndicator = Find<Border>("ThemeIndicator");
         themeIndicatorTransform = (TranslateTransform)themeIndicator.RenderTransform;
         LoadSettings();
-
+        bool loadedEqualPorts = savedGatewayPort == tunnelClientPort;
+        if (loadedEqualPorts)
+        {
+            LogRuntimeError("Persisted Gateway and Tunnel Client ports are both " + tunnelClientPort + "; defaults restored.",
+                new InvalidOperationException("Gateway port and Tunnel Client port must be different."));
+            savedGatewayPort = DefaultGatewayPort;
+            tunnelClientPort = DefaultTunnelClientPort;
+            SaveSettings();
+        }
 
         try { gatewayPort = ResolveGatewayPort(savedGatewayPort); }
         catch (Exception ex)
@@ -357,6 +375,7 @@ internal sealed partial class ControlPanelRuntime
             LogRuntimeError("Invalid DESKTOP_MCP_PORT; saved Gateway port used.", ex);
             ShowToast("DESKTOP_MCP_PORT is invalid; using the saved Gateway port.", true);
         }
+        if (loadedEqualPorts) ShowToast("Gateway port and Tunnel Client port must be different. Default ports were restored.", true);
         Find<TextBox>("GatewayPortInput").Text = gatewayPort.ToString();
         Find<TextBox>("TunnelClientPortInput").Text = tunnelClientPort.ToString();
         InitializePendingUpdateVerification();
@@ -845,6 +864,25 @@ internal sealed partial class ControlPanelRuntime
         return false;
     }
 
+    private static async Task<bool> WaitForTcpPortAsync(int port, int timeoutSeconds)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using (TcpClient client = new TcpClient())
+                {
+                    Task connect = client.ConnectAsync(IPAddress.Loopback, port);
+                    if (await Task.WhenAny(connect, Task.Delay(1000)) == connect && client.Connected) return true;
+                }
+            }
+            catch { }
+            await Task.Delay(250);
+        }
+        return false;
+    }
+
     private async void ApplyPortSettings()
     {
         int nextGatewayPort;
@@ -860,14 +898,19 @@ internal sealed partial class ControlPanelRuntime
             ShowToast("DESKTOP_MCP_PORT overrides the saved Gateway port. Remove it to change this value.", true);
             return;
         }
+        if (PortsConflict(nextGatewayPort, nextTunnelPort))
+        {
+            ShowToast("Gateway port and Tunnel Client port must be different.", true);
+            return;
+        }
         if (nextGatewayPort != gatewayPort && !IsPortAvailable(nextGatewayPort))
         {
-            ShowToast("Gateway port " + nextGatewayPort + " is already in use.", true);
+            ShowToast("Gateway port " + nextGatewayPort + " is not available (in use or blocked).", true);
             return;
         }
         if (nextTunnelPort != tunnelClientPort && !IsPortAvailable(nextTunnelPort))
         {
-            ShowToast("Tunnel Client port " + nextTunnelPort + " is already in use.", true);
+            ShowToast("Tunnel Client port " + nextTunnelPort + " is not available (in use or blocked).", true);
             return;
         }
         int previousGatewayPort = gatewayPort;
@@ -896,13 +939,25 @@ internal sealed partial class ControlPanelRuntime
             {
                 await Task.Run(delegate { RestartGateway(selectedProfile, previousGatewayPort); });
                 if (!await WaitForGatewayReadyAsync())
-                    throw new TimeoutException("Gateway did not become ready on port " + gatewayPort + ".");
+                {
+                    string gatewayFailure = "Gateway port " + gatewayPort + " is not responding (health check failed).";
+                    LogRuntimeError(gatewayFailure, new TimeoutException(gatewayFailure));
+                    ShowToast(gatewayFailure, true);
+                    return;
+                }
             }
             if (gatewayChanged || tunnelChanged)
             {
                 if (IsValidTunnelId(tunnelId))
                     await Task.Run(delegate { ConfigureTunnelProfile(tunnelId); });
-                if (IsValidTunnelId(tunnelId) && HasTunnelKey()) ReconnectTunnel();
+                if (IsValidTunnelId(tunnelId) && HasTunnelKey() && await ReconnectTunnel() &&
+                    !await WaitForTcpPortAsync(tunnelClientPort, 10))
+                {
+                    string tunnelFailure = "Tunnel Client port " + tunnelClientPort + " is not listening (tunnel-client did not start).";
+                    LogRuntimeError(tunnelFailure, new TimeoutException(tunnelFailure));
+                    ShowToast(tunnelFailure, true);
+                    return;
+                }
             }
             ShowToast("Port settings saved.", false);
         }
@@ -2577,9 +2632,9 @@ internal sealed partial class ControlPanelRuntime
         }
     }
 
-    private async void ReconnectTunnel()
+    private async Task<bool> ReconnectTunnel()
     {
-        if (!IsValidTunnelId(tunnelId) || !HasTunnelKey()) { ConfigureTunnel(); return; }
+        if (!IsValidTunnelId(tunnelId) || !HasTunnelKey()) { ConfigureTunnel(); return false; }
         Button reconnectButton = Find<Button>("TunnelReconnectButton");
         reconnectButton.IsEnabled = false;
         Find<TextBlock>("TunnelStatus").Text = "Reconnecting…";
@@ -2598,7 +2653,7 @@ internal sealed partial class ControlPanelRuntime
             if (!stopped)
             {
                 ShowToast("Could not safely stop the current Tunnel. It may still be running.", true);
-                return;
+                return false;
             }
             bool previousAutoStartTunnel = autoStartTunnel;
             int previousTunnelRetryIndex = tunnelRetryIndex;
@@ -2615,8 +2670,9 @@ internal sealed partial class ControlPanelRuntime
                 throw;
             }
             ShowToast("Reconnecting Tunnel…", false);
+            return true;
         }
-        catch (Exception ex) { ShowToast("Could not reconnect Tunnel: " + ex.Message, true); }
+        catch (Exception ex) { ShowToast("Could not reconnect Tunnel: " + ex.Message, true); return false; }
         finally { UpdateTunnelSettingsUi(); UpdateStatus(); }
     }
 
@@ -3200,7 +3256,7 @@ internal sealed partial class ControlPanelRuntime
         Find<Button>("TunnelConfigureButton").Click += delegate { ConfigureTunnel(); };
         Find<Button>("TunnelSetupCancelButton").Click += delegate { HideTunnelSetupOverlay(); };
         Find<Button>("TunnelSetupSaveButton").Click += delegate { SaveTunnelSetup(); };
-        Find<Button>("TunnelReconnectButton").Click += delegate { ReconnectTunnel(); };
+        Find<Button>("TunnelReconnectButton").Click += delegate { _ = ReconnectTunnel(); };
         Find<Button>("SavePortSettingsButton").Click += delegate { ApplyPortSettings(); };
         Find<Button>("UpdateButton").Click += delegate { HandleUpdateButton(); };
         Find<Button>("SettingsButton").Click += delegate { ToggleSettings(); };

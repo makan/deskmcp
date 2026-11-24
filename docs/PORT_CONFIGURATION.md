@@ -7,7 +7,14 @@ DeskMCP exposes two configurable local service ports:
 | Gateway Port | 8120 | Local DeskMCP Gateway HTTP server |
 | Tunnel Client Port | 8888 | Local tunnel-client health, readiness, metrics, and UI server |
 
-Both values accept integer TCP ports from 1 through 65535. Empty, non-integer, zero, negative, and out-of-range values are rejected. The Control Panel checks whether a changed port can be bound before saving it and reports a port-in-use error when the bind check fails.
+Both values accept integer TCP ports from 1 through 65535. Empty, non-integer, zero, negative, and out-of-range values are rejected. See [Validation rules](#validation-rules) for the additional checks.
+
+## Validation rules
+
+- **Ports must differ.** Saving is rejected, before anything is persisted or restarted, when the effective Gateway port equals the Tunnel Client port (`Gateway port and Tunnel Client port must be different.`). The effective Gateway port includes the `DESKTOP_MCP_PORT` override, so an override that equals the Tunnel Client port is rejected too. If persisted settings already contain equal ports at load time, the Control Panel logs it, restores the defaults (8120 / 8888), and shows an error.
+- **Ports must be bindable.** A changed port is checked with a bind on `127.0.0.1`; failure reports `<Service> port <N> is not available (in use or blocked).`
+- **Ports must be listening after restart (Windows).** After the services restart, the Control Panel polls the Gateway `GET /health` and, when a Tunnel is configured and was restarted, waits up to about 10 seconds for the Tunnel Client port to accept TCP connections. If a check fails, an error naming the port and service is shown and logged, and `Port settings saved.` is not shown.
+- `scripts/configure-tunnel.ps1` throws when the resolved Gateway and Tunnel Client ports are equal.
 
 ## Persistence
 

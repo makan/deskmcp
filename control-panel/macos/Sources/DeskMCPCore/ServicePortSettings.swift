@@ -21,4 +21,9 @@ public enum DeskMCPServicePorts {
            !raw.isEmpty, let override = parse(raw) { return override }
         return isValid(saved) ? saved : defaultGatewayPort
     }
+
+    /// True when the effective Gateway port (after any DESKTOP_MCP_PORT override) equals the Tunnel Client port.
+    public static func portsConflict(savedGateway: Int, environment: String?, tunnelClient: Int) -> Bool {
+        resolveGatewayPort(saved: savedGateway, environment: environment) == tunnelClient
+    }
 }

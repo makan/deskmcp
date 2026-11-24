@@ -22,6 +22,16 @@ final class ServicePortSettingsTests: XCTestCase {
         XCTAssertEqual(DeskMCPServicePorts.resolveGatewayPort(saved: 9000, environment: "invalid"), 9000)
     }
 
+    func testGatewayAndTunnelClientPortsMustBeDifferent() {
+        XCTAssertFalse(DeskMCPServicePorts.portsConflict(savedGateway: 8120, environment: nil, tunnelClient: 8888))
+        XCTAssertTrue(DeskMCPServicePorts.portsConflict(savedGateway: 9000, environment: nil, tunnelClient: 9000))
+        // DESKTOP_MCP_PORT overrides the saved Gateway port, so the effective value is compared.
+        XCTAssertTrue(DeskMCPServicePorts.portsConflict(savedGateway: 8120, environment: "8888", tunnelClient: 8888))
+        XCTAssertFalse(DeskMCPServicePorts.portsConflict(savedGateway: 8888, environment: "9000", tunnelClient: 8888))
+        // An invalid override is ignored and the saved value is compared.
+        XCTAssertTrue(DeskMCPServicePorts.portsConflict(savedGateway: 8888, environment: "invalid", tunnelClient: 8888))
+    }
+
     func testStrictParsing() {
         XCTAssertEqual(DeskMCPServicePorts.parse("8120"), 8120)
         XCTAssertEqual(DeskMCPServicePorts.parse(" 8888 "), 8888)

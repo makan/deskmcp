@@ -50,6 +50,15 @@ final class DeskMCPModel: ObservableObject {
         let savedTunnelPort = defaults.object(forKey: "tunnelClientPort") as? Int ?? DeskMCPServicePorts.defaultTunnelClientPort
         tunnelClientPort = (1...65535).contains(savedTunnelPort) ? savedTunnelPort : DeskMCPServicePorts.defaultTunnelClientPort
         if let raw = environmentGatewayPort, !raw.isEmpty, Int(raw).map({ !(1...65535).contains($0) }) ?? true { message = "DESKTOP_MCP_PORT is invalid; using the saved Gateway port." }
+        if self.savedGatewayPort == tunnelClientPort {
+            NSLog("DeskMCP: persisted Gateway and Tunnel Client ports are both %d; defaults restored.", tunnelClientPort)
+            self.savedGatewayPort = DeskMCPServicePorts.defaultGatewayPort
+            tunnelClientPort = DeskMCPServicePorts.defaultTunnelClientPort
+            gatewayPort = DeskMCPServicePorts.resolveGatewayPort(saved: self.savedGatewayPort, environment: environmentGatewayPort)
+            defaults.set(self.savedGatewayPort, forKey: "gatewayPort")
+            defaults.set(tunnelClientPort, forKey: "tunnelClientPort")
+            message = "Gateway port and Tunnel Client port must be different. Default ports were restored."
+        }
         let storedProfile = defaults.string(forKey: "profile")
         profile = storedProfile == DeskMCPProfile.workspaceWrite.rawValue ? .workspaceWrite : .readOnly
         if #available(macOS 13.0, *) {
@@ -96,6 +105,10 @@ final class DeskMCPModel: ObservableObject {
         let hasGatewayPortOverride = DeskMCPServicePorts.parse(ProcessInfo.processInfo.environment["DESKTOP_MCP_PORT"] ?? "") != nil
         if hasGatewayPortOverride && nextGatewayPort != gatewayPort {
             message = "DESKTOP_MCP_PORT overrides the saved Gateway port. Remove it to change this value."
+            return
+        }
+        if DeskMCPServicePorts.portsConflict(savedGateway: nextGatewayPort, environment: ProcessInfo.processInfo.environment["DESKTOP_MCP_PORT"], tunnelClient: nextTunnelPort) {
+            message = "Gateway port and Tunnel Client port must be different."
             return
         }
         if nextGatewayPort != gatewayPort && !isPortAvailable(nextGatewayPort) {

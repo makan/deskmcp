@@ -20,6 +20,7 @@ if ($TunnelClientPort -eq 0 -and $settings.tunnelClientPort -ge 1 -and $settings
 elseif ($TunnelClientPort -eq 0) { $TunnelClientPort = $DeskMCPDefaultTunnelClientPort }
 if ($GatewayPort -lt 1 -or $GatewayPort -gt 65535) { throw 'GatewayPort must be between 1 and 65535.' }
 if ($TunnelClientPort -lt 1 -or $TunnelClientPort -gt 65535) { throw 'TunnelClientPort must be between 1 and 65535.' }
+if ($GatewayPort -eq $TunnelClientPort) { throw 'GatewayPort and TunnelClientPort must be different.' }
 if ([string]::IsNullOrWhiteSpace($env:HEALTH_LISTEN_ADDR)) { $env:HEALTH_LISTEN_ADDR = "127.0.0.1:$TunnelClientPort" }
 
 & $TunnelClient init `
