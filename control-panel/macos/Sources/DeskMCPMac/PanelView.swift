@@ -114,7 +114,7 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Workspace").font(.caption).foregroundStyle(.secondary)
             HStack {
-                Text(model.workspace).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                Text(model.workspace).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("Change") { model.chooseWorkspace() }
             }

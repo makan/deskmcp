@@ -241,7 +241,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
               <TextBlock x:Name="ScopeLabel" Text="Scope" Foreground="#8E8E93" FontSize="10"/>
-              <TextBlock x:Name="ScopeText" Text="Checking&#x2026;" Foreground="#18181B" FontSize="12" FontWeight="SemiBold" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" MaxWidth="270"/>
+              <TextBlock x:Name="ScopeText" Text="Checking&#x2026;" Foreground="#18181B" FontSize="12" FontWeight="SemiBold" Margin="0,4,0,0" TextWrapping="Wrap" MaxWidth="270"/>
             </StackPanel>
             <Border x:Name="LocalOnlyPill" Grid.Column="1" Background="#EDF8EF" BorderBrush="#142E7D32" BorderThickness="1" CornerRadius="12" Padding="9,5" VerticalAlignment="Center">
               <TextBlock x:Name="LocalOnlyText" Text="Local only" Foreground="#2E7D32" FontSize="10" FontWeight="SemiBold"/>
@@ -286,7 +286,7 @@
                   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <StackPanel>
                     <TextBlock x:Name="WorkspaceLabel" Text="Workspace" Foreground="#18181B" FontSize="11" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="WorkspacePathText" Text="test-area" Foreground="#8E8E93" FontSize="10" Margin="0,3,10,0" TextTrimming="CharacterEllipsis" MaxWidth="250"/>
+                    <TextBlock x:Name="WorkspacePathText" Text="test-area" Foreground="#8E8E93" FontSize="10" Margin="0,3,10,0" TextWrapping="Wrap" MaxWidth="250"/>
                   </StackPanel>
                   <Button Grid.Column="1" x:Name="WorkspaceChangeButton" Style="{StaticResource MiniButton}" Content="Change" Padding="12,7"/>
                 </Grid>
