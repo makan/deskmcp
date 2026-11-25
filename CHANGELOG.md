@@ -4,6 +4,19 @@ All notable changes to DeskMCP are documented here.
 
 ## Unreleased
 
+## 0.9.19 — 2026-11-25
+
+### Added
+
+- Added a live received-command counter to the Control Panel so the number of commands handled since startup is visible beneath the Gateway status.
+- Added configurable Gateway and Tunnel Client ports in Settings, with defaults of 8120 and 8888.
+
+### Fixed
+
+- Added validation for Gateway and Tunnel Client port values to reject invalid or conflicting configuration before startup.
+- Fixed long Workspace paths in the Windows Control Panel so the complete path is displayed and handled correctly.
+
+
 ## 0.9.17 — 2026-09-24
 
 ### Changed
